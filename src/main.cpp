@@ -98,8 +98,16 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          double steer_value = j[1]["steering_angle"];
+          double throttle_value = j[1]["throttle"];
+		  
+		  // // attempt to adjust for delay before transformation
+		  // // I have to divide delay by 2 to make it work [ I don't know why? :( ]
+		  // double delay_in_seconds = 0.075;
+		  // px = px + vel * cos(psi) * delay_in_seconds;
+		  // py = py + vel * sin(psi) * delay_in_seconds;
+		  // psi = psi - vel * steer_value / 2.67 * delay_in_seconds;
+		  // vel = vel + throttle_value * delay_in_seconds;
 		  
 		  // transform way points to vehicle's coordinate space
           for (size_t i = 0; i < ptsx.size(); i++) {
@@ -118,19 +126,29 @@ int main() {
 		  double cte = polyeval(coeffs, /*px*/0) - 0/*py*/;
 		  double epsi = /*psi*/0 - atan(coeffs[1] + 0/*2*px*coeffs[2]+3*coeffs[3]*pow(px,2)*/);
 		  
+		  // adjust for delay after transformation
+		  double delay_in_seconds = 0.1;
+		  px = 0 + vel * cos(0) * delay_in_seconds;
+		  py = 0 + vel * sin(0) * delay_in_seconds;
+		  psi = 0 - (vel * steer_value / 2.67 * delay_in_seconds);
+		  vel = vel + (throttle_value * delay_in_seconds);
+		  cte = cte + (vel * sin(epsi) * delay_in_seconds);
+		  epsi = epsi - (vel * atan(coeffs[1]) / 2.67 * delay_in_seconds);
+		  
 		  // store the state of the vehicle in a variable
           Eigen::VectorXd state(6);
-          state << 0.0, 0.0, 0.0, vel, cte, epsi;
+          // // // state << 0.0, 0.0, 0.0, vel, cte, epsi;		// use if delay is accounted for before transformation
+          state << px, py, psi, vel, cte, epsi;					// use if delay is accounted for after transformation
 		  
-		  // use mpc to solve ...
+		  // use mpc to get desired values for actuator variables/controller
           auto vars = mpc.Solve(state, coeffs);
-		  steer_value = vars[0];
+		  steer_value = vars[0] / deg2rad(25);
 		  throttle_value = vars[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value / deg2rad(25);
+          msgJson["steering_angle"] = steer_value;
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 

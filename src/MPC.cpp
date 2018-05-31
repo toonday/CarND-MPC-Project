@@ -2,6 +2,11 @@
 #include <cppad/cppad.hpp>
 #include <cppad/ipopt/solve.hpp>
 #include "Eigen-3.3/Eigen/Core"
+#include <iostream>
+#include <vector>
+#include <string>
+#include <sstream>
+#include <fstream>
 
 using CppAD::AD;
 
@@ -23,7 +28,7 @@ const double Lf = 2.67;
 
 double ref_cte = 0.0;
 double ref_epsi = 0.0;
-double ref_vel = 60.0;
+double ref_vel = 90.0;
 
 size_t x_start = 0;
 size_t y_start = x_start + (1 * N);
@@ -33,6 +38,41 @@ size_t cte_start = x_start + (4 * N);
 size_t epsi_start = x_start + (5 * N);
 size_t rot_actuator_start = x_start + (6 * N);
 size_t lin_actuator_start = x_start + (7 * N) - 1;
+	
+double tune_params[8] = {
+	/* 0 */ 3000.0 /*cte*/,								/* minimize cross track error */
+	/* 1 */ 3000.0 /*epsi*/,							/* minmize psi error */
+	/* 2 */ 20.0 /*vel*/,								/* try to match desired velocity */
+	/* 3 */ 10.0 /*rot_actuator_start*/,				/* minimize use of rotational actuator */
+	/* 4 */ 10.0 /*lin_actuator_start*/,				/* minimize use of linear actuator */
+	/* 5 */ 100000.0 /*rot_actuator_start_delta*/,		/* minimize delta between turn angles (for smooth turns and avoiding swaying motion) */
+	/* 6 */ 100.0 /*lin_actuator_start_delta*/,			/* minimize delta between acceleration/deceleration (to avoid jerky start and stop motions) */
+	/* 7 */ 1000.0 /*rot_actuator_start__vel*/,			/* minimize use of rotational actuator with high velocity (don't make huge turns on high speed) */
+};
+
+void InitParamValues() {
+  std::fstream floatParamsFile("../params.txt");
+  std::string floatStr;
+  std::vector<float> floatParams;
+
+  while (std::getline(floatParamsFile, floatStr)) {
+    floatParams.push_back(atof(floatStr.c_str()));
+  }
+
+  N = (int)floatParams[0];
+  dt = floatParams[1];
+  ref_cte = floatParams[2];
+  ref_epsi = floatParams[3];
+  ref_vel = floatParams[4];
+  tune_params[0] = floatParams[5];
+  tune_params[1] = floatParams[6];
+  tune_params[2] = floatParams[7];
+  tune_params[3] = floatParams[8];
+  tune_params[4] = floatParams[9];
+  tune_params[5] = floatParams[10];
+  tune_params[6] = floatParams[11];
+  tune_params[7] = floatParams[12];
+}
 
 class FG_eval {
  public:
@@ -51,16 +91,6 @@ class FG_eval {
 	// Set the Cost Function fg[0]
 	// ===============================================
     fg[0] = 0.0;
-	
-	double tune_params[8] = {
-		9000.0 /*cte*/,
-		9000.0 /*epsi*/,
-		1.0 /*vel*/,
-		5.0 /*rot_actuator_start*/,
-		5.0 /*lin_actuator_start*/,
-		8000000.0 /*rot_actuator_start_delta*/,
-		80.0 /*lin_actuator_start_delta*/,
-	};
 
     // The part of the cost based on the reference state.
     for (size_t t = 0; t < N; t++) {
@@ -73,10 +103,12 @@ class FG_eval {
     for (size_t t = 0; t < N - 1; t++) {
       fg[0] += tune_params[3] * CppAD::pow(vars[rot_actuator_start + t], 2);
       fg[0] += tune_params[4] * CppAD::pow(vars[lin_actuator_start + t], 2);
+      fg[0] += tune_params[7] * CppAD::pow(vars[rot_actuator_start + t] * vars[vel_start + t], 2);
     }
 
     // Minimize the value gap between sequential actuations.
-    for (size_t t = 0; t < N - 2; t++) {
+	size_t num_actuator_points = 1;
+    for (size_t t = 0; t < N - (num_actuator_points + 1); ++t) {
       fg[0] += tune_params[5] * CppAD::pow(vars[rot_actuator_start + t + 1] - vars[rot_actuator_start + t], 2);
       fg[0] += tune_params[6] * CppAD::pow(vars[lin_actuator_start + t + 1] - vars[lin_actuator_start + t], 2);
     }
@@ -132,6 +164,8 @@ MPC::MPC() {}
 MPC::~MPC() {}
 
 vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
+  InitParamValues();
+
   bool ok = true;
   typedef CPPAD_TESTVECTOR(double) Dvector;
   
@@ -177,8 +211,8 @@ vector<double> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
   }
   
   for (size_t i = rot_actuator_start; i < lin_actuator_start; i++) {
-    vars_lowerbound[i] = -deg_to_rad(25.0) * Lf;
-    vars_upperbound[i] = deg_to_rad(25.0) * Lf;
+    vars_lowerbound[i] = -deg_to_rad(25.0);
+    vars_upperbound[i] = deg_to_rad(25.0);
   }
   
   for (size_t i = lin_actuator_start; i < n_vars; i++) {
